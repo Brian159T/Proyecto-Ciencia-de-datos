@@ -30,11 +30,11 @@
     </div>
   </section>
   <section class="card input-panel" aria-labelledby="input-title">
-    <div class="section-heading"><div><p class="eyebrow">02 / HISTORIAL</p><h2 id="input-title">Ingreso de datos históricos</h2><p>Completa la tabla, pega registros o combina ambas opciones sin repetir fechas.</p></div><span class="label">Mínimo 3 registros</span></div>
+    <div class="section-heading"><div><p class="eyebrow">02 / HISTORIAL</p><h2 id="input-title">Ingreso de datos históricos</h2><p>Completa la tabla, pega registros, carga un Excel o combina las opciones sin repetir fechas.</p></div><span class="label">Mínimo 3 registros</span></div>
     {% if errors %}
     <div class="notice error" role="alert"><h3>Revisa los datos ingresados</h3><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>
     {% endif %}
-    <form action="{{ url_for('predict') }}" method="post">
+    <form action="{{ url_for('predict') }}" method="post" enctype="multipart/form-data">
       <div class="entry-grid">
         <div>
           <div class="table-scroll"><table class="input-table"><caption>Registros diarios. Deja vacías las filas que no necesites.</caption><thead><tr><th scope="col">N.º</th><th scope="col">Fecha</th><th scope="col">Objetos perdidos</th></tr></thead>
@@ -44,6 +44,10 @@
           <label for="bulk">Pegar múltiples registros <span class="optional">Opcional</span></label>
           <p class="help" id="bulk-help">Una fecha y una cantidad por línea, separadas por una coma. Formato: <code>AAAA-MM-DD,cantidad</code>. Sin encabezado.</p>
           <textarea id="bulk" name="bulk" rows="12" maxlength="200000" aria-describedby="bulk-help" placeholder="Pega aquí tus registros reales…">{{ form.bulk }}</textarea>
+          <div class="excel-box"><label for="excel">Cargar archivo de Excel <span class="optional">Opcional</span></label>
+          <p class="help" id="excel-help">Archivo <code>.xlsx</code>: columna A con la fecha y columna B con la cantidad (primera hoja). El encabezado es opcional. Se combina con la tabla y el texto pegado.</p>
+          <input id="excel" name="excel" type="file" accept=".xlsx" aria-describedby="excel-help">
+          {% if form.excel_name %}<p class="help">Último archivo: <b>{{ form.excel_name }}</b>{% if form.excel %} · {{ form.excel|length }} filas leídas{% endif %}. Selecciónalo de nuevo si deseas recalcular.</p>{% endif %}</div>
           <div class="notice subtle"><strong>Mejores datos, mejor contexto</strong><p>Se recomiendan 14 o más observaciones reales. Un día sin registro no se interpreta como cero: registra 0 solo si se verificó que no hubo objetos.</p></div>
           <p class="help">Se admiten hasta 2 000 registros. Las cantidades deben ser enteros no negativos.</p>
         </div>
@@ -78,6 +82,23 @@
   <section aria-labelledby="forecast-title"><div class="section-heading"><div><p class="eyebrow">05 / PROYECCIÓN</p><h2 id="forecast-title">Predicciones futuras</h2><p>A partir del día siguiente al último registro; incluye todos los días del calendario.</p></div></div>
     <div class="forecast-grid"><div class="card forecast-summary"><span class="label success">Próximos {{ result.horizon }} días</span><p>Total estimado de objetos</p><strong class="forecast-total">{{ '%.2f'|format(result.total) }}</strong><p>Promedio diario previsto: <b>{{ '%.2f'|format(result.future_average) }}</b> objetos.</p><hr><h3>Interpretación de la tendencia</h3><p>{{ result.trend }}.</p><p class="help">Se considera cercana a cero una pendiente cuyo cambio durante el historial es menor al 1 % del mayor entre el promedio observado y 1.</p><p>Una tendencia histórica no garantiza que el comportamiento futuro sea igual. Las estimaciones son valores esperados, por eso pueden contener decimales.</p>{% if result.clipped %}<div class="notice warning">Se aplicó un mínimo de cero a las predicciones negativas. El total y el promedio utilizan estos valores limitados.</div>{% endif %}</div>
     <div class="card forecast-table"><div class="table-scroll forecast-scroll"><table><caption>Cantidad estimada por fecha · no son registros reales</caption><thead><tr><th scope="col">Fecha</th><th scope="col">Objetos estimados</th></tr></thead><tbody>{% for day, quantity in result.predictions %}<tr><td>{{ day.strftime('%d/%m/%Y') }}</td><td>{{ '%.2f'|format(quantity) }}</td></tr>{% endfor %}</tbody></table></div></div></div>
+  </section>
+  <section class="summary" aria-labelledby="summary-title">
+    <div class="summary-head"><div><p class="eyebrow">06 / RESUMEN EJECUTIVO</p><h2 id="summary-title">Resultados generales del proyecto</h2><p>Regresión lineal · {{ result.origin.strftime('%d/%m/%Y') }} — {{ result.last.strftime('%d/%m/%Y') }} · {{ result.count }} observaciones reales</p></div><span class="quality q-{{ result.quality_level }}">{{ result.quality }}</span></div>
+    <div class="summary-hero">
+      <div class="big-kpi"><span>Objetos estimados · próximos {{ result.horizon }} días</span><strong>{{ '%.0f'|format(result.total) }}</strong><small>≈ {{ '%.2f'|format(result.future_average) }} objetos por día</small></div>
+      <div class="big-kpi"><span>Coeficiente R²</span><strong>{% if result.fit.r2 is not none %}{{ '%.1f'|format(result.fit.r2 * 100) }} %{% else %}—{% endif %}</strong><small>{% if result.fit.r2 is not none %}de la variación explicada por el tiempo{% else %}Cantidades constantes: no aplica{% endif %}</small>{% if result.fit.r2 is not none %}<div class="gauge" role="img" aria-label="R² {{ '%.1f'|format(result.fit.r2*100) }} por ciento"><i style="width:{{ [0, [result.fit.r2*100, 100]|min]|max }}%"></i></div>{% endif %}</div>
+      <div class="big-kpi"><span>Tendencia diaria</span><strong>{{ '%+.3f'|format(result.slope) }}</strong><small>objetos por día · {{ 'creciente' if result.trend.endswith('creciente') else 'decreciente' if result.trend.endswith('decreciente') else 'sin tendencia importante' }}</small></div>
+    </div>
+    <div class="summary-grid">
+      <div class="mini"><span>Ecuación</span><b>{{ result.equation }}</b></div>
+      <div class="mini"><span>Promedio histórico</span><b>{{ '%.2f'|format(result.average) }}</b></div>
+      <div class="mini"><span>Máximo registrado</span><b>{{ '%.0f'|format(result.peak) }} <em>({{ result.peak_date.strftime('%d/%m/%Y') }})</em></b></div>
+      <div class="mini"><span>Error medio (MAE)</span><b>{{ '%.2f'|format(result.fit.mae) }}</b></div>
+      <div class="mini"><span>RMSE</span><b>{{ '%.2f'|format(result.fit.rmse) }}</b></div>
+      <div class="mini"><span>{{ 'R² en evaluación' if result.evaluation else 'Evaluación' }}</span><b>{% if result.evaluation %}{{ '%.3f'|format(result.evaluation.r2) if result.evaluation.r2 is not none else 'No aplica' }}{% else %}Requiere ≥ 10 datos{% endif %}</b></div>
+    </div>
+    <div class="conclusion"><h3>Conclusión</h3><p>{{ result.trend }}: la pendiente es de {{ '%+.3f'|format(result.slope) }} objetos por día. El modelo pasa de {{ '%.2f'|format(result.first_pred) }} a {{ '%.2f'|format(result.last_pred) }} objetos diarios en el periodo proyectado, con un total estimado de {{ '%.0f'|format(result.total) }} objetos. {{ result.quality }}{% if result.fit.r2 is not none %} (R² = {{ '%.4f'|format(result.fit.r2) }}){% endif %}. Estas cifras son valores esperados a partir del historial; no garantizan el comportamiento futuro.</p></div>
   </section>
   {% else %}
   <div class="empty-state"><span class="empty-icon" aria-hidden="true">↗</span><h3>Tu próximo análisis comienza aquí</h3><p>Ingresa al menos 3 registros reales y pulsa «Calcular regresión». Los resultados, gráficos y predicciones aparecerán en esta página.</p></div>
