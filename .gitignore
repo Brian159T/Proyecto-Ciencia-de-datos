@@ -1,0 +1,63 @@
+# Entornos virtuales de Python
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos compilados y cachés de Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Cobertura y resultados temporales de pruebas
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# Paquetes y artefactos generados
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Variables de entorno y configuración privada local
+.env
+.env.*
+!.env.example
+!.env.sample
+instance/
+
+# Caché de Matplotlib y certificados temporales de instalación
+.matplotlib/
+fontlist-v*.json
+windows-ca.pem
+
+# Logs y archivos temporales
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.ipynb_checkpoints/
+
+# Configuración local de editores
+.vscode/
+.idea/
+*.code-workspace
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
