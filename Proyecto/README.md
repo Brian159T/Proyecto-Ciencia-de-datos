@@ -4,7 +4,7 @@ Aplicación independiente en la carpeta **Proyecto**, con un único servidor Fla
 
 ## Instalación y ejecución en Windows
 
-Usa **Python 3.10 a 3.13** (verificación local con Python 3.10.11).
+Usa **Python 3.10 a 3.13** (entorno local: Python 3.12.8).
 
 Desde el directorio que contiene Proyecto:
 
@@ -48,7 +48,7 @@ Los registros se ordenan por fecha. X representa días naturales transcurridos d
 
 El promedio histórico corresponde únicamente a los días registrados. Una tendencia histórica no garantiza el comportamiento futuro; las estimaciones pueden contener decimales y no constituyen conteos observados ni intervalos de confianza.
 
-Los **110 objetos de agosto (año sin confirmar)** y los **aproximadamente 5 diarios** de la entrevista se muestran como referencia y nunca se incorporan al entrenamiento. No hay observaciones ficticias precargadas.
+Los **110 objetos de agosto de 2026** y los **aproximadamente 5 diarios** de la entrevista se muestran como referencia y nunca se incorporan al entrenamiento. No hay observaciones ficticias precargadas.
 
 ## Archivos y flujo
 
@@ -77,7 +77,7 @@ Versiones contrastadas con las fichas oficiales de [Flask](https://pypi.org/proj
 
 ## Comprobaciones realizadas
 
-Se ejecutaron 15 pruebas automatizadas con unittest y el cliente de Flask: plantilla y CSS, formulario POST, fechas y cantidades inválidas, duplicados, horizontes, preservación de entradas, entrenamiento real, cambios de predicciones, métricas contrastadas con cálculos manuales, separación cronológica, series constantes, límite cero y tres PNG Base64 válidos. Todas pasaron. Los datos sintéticos de prueba existieron únicamente en memoria y no están precargados en la aplicación.
+Se ejecutaron 15 pruebas automatizadas con unittest y el cliente de Flask: plantilla y CSS, formulario POST, fechas y cantidades inválidas, duplicados, horizontes, preservación de entradas, entrenamiento real, cambios de predicciones, métricas contrastadas con cálculos manuales, separación cronológica, series constantes, límite cero y tres PNG Base64 válidos. Todas pasaron. Los archivos de pruebas no forman parte de este repositorio; solo se incluyen la aplicación, la plantilla y los estilos. Los datos sintéticos de prueba existieron únicamente en memoria y no están precargados en la aplicación.
 
 La comprobación de dependencias con python -m pip check pasó. También se inició python app.py y se comprobó una respuesta HTTP 200 en http://127.0.0.1:5000.
 
