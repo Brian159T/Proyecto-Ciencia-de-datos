@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Análisis de objetos perdidos UNIFRANZ mediante regresión lineal con datos reales ingresados manualmente.">
+  <title>Objetos perdidos · UNIFRANZ</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+<header class="masthead">
+  <div class="container heading">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">U</span><span>UNIFRANZ <small>Servicios Estudiantiles</small></span></div>
+    <span class="pill">Análisis estadístico</span>
+  </div>
+  <div class="container hero">
+    <p class="eyebrow">DATOS QUE AYUDAN A PLANIFICAR</p>
+    <h1>Sistema de Predicción de Objetos Perdidos</h1>
+    <p>Universidad UNIFRANZ — Análisis mediante regresión lineal</p>
+    <div class="hero-note"><span class="dot"></span> Historial real · Modelo en Python · Predicciones diarias</div>
+  </div>
+</header>
+<main class="container">
+  <section aria-labelledby="reference-title" class="reference-section">
+    <div class="section-heading"><div><p class="eyebrow">01 / CONTEXTO</p><h2 id="reference-title">Información general</h2></div><span class="label">Referencia de entrevista</span></div>
+    <div class="reference-grid">
+      <article class="card reference"><span>Objetos recibidos en agosto</span><strong>110 <small>objetos</small></strong><p>Año todavía no confirmado.</p></article>
+      <article class="card reference"><span>Recepción diaria aproximada</span><strong>~5 <small>objetos / día</small></strong><p>Estimación indicada en la entrevista.</p></article>
+      <aside class="reference-note"><h3>El análisis empieza con tus datos</h3><p>Estas cifras son informativas. No se utilizan como observaciones diarias ni para entrenar el modelo. Ingresa únicamente registros reales.</p></aside>
+    </div>
+  </section>
+  <section class="card input-panel" aria-labelledby="input-title">
+    <div class="section-heading"><div><p class="eyebrow">02 / HISTORIAL</p><h2 id="input-title">Ingreso de datos históricos</h2><p>Completa la tabla, pega registros o combina ambas opciones sin repetir fechas.</p></div><span class="label">Mínimo 3 registros</span></div>
+    {% if errors %}
+    <div class="notice error" role="alert"><h3>Revisa los datos ingresados</h3><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>
+    {% endif %}
+    <form action="{{ url_for('predict') }}" method="post">
+      <div class="entry-grid">
+        <div>
+          <div class="table-scroll"><table class="input-table"><caption>Registros diarios. Deja vacías las filas que no necesites.</caption><thead><tr><th scope="col">N.º</th><th scope="col">Fecha</th><th scope="col">Objetos perdidos</th></tr></thead>
+          <tbody>{% for day, quantity in form.rows %}<tr><td class="row-number">{{ loop.index }}</td><td><label class="sr-only" for="date-{{ loop.index }}">Fecha, fila {{ loop.index }}</label><input id="date-{{ loop.index }}" name="date" type="date" value="{{ day }}"></td><td><label class="sr-only" for="quantity-{{ loop.index }}">Cantidad, fila {{ loop.index }}</label><input id="quantity-{{ loop.index }}" name="quantity" type="number" min="0" max="1000000" step="1" value="{{ quantity }}" placeholder="Cantidad"></td></tr>{% endfor %}</tbody></table></div>
+        </div>
+        <div class="bulk-panel">
+          <label for="bulk">Pegar múltiples registros <span class="optional">Opcional</span></label>
+          <p class="help" id="bulk-help">Una fecha y una cantidad por línea, separadas por una coma. Formato: <code>AAAA-MM-DD,cantidad</code>. Sin encabezado.</p>
+          <textarea id="bulk" name="bulk" rows="12" maxlength="200000" aria-describedby="bulk-help" placeholder="Pega aquí tus registros reales…">{{ form.bulk }}</textarea>
+          <div class="notice subtle"><strong>Mejores datos, mejor contexto</strong><p>Se recomiendan 14 o más observaciones reales. Un día sin registro no se interpreta como cero: registra 0 solo si se verificó que no hubo objetos.</p></div>
+          <p class="help">Se admiten hasta 2 000 registros. Las cantidades deben ser enteros no negativos.</p>
+        </div>
+      </div>
+      <div class="form-bottom">
+        <div class="horizon-fields"><div><label for="horizon">Días hacia el futuro</label><select id="horizon" name="horizon">{% for value, text in [('7','7 días'),('14','14 días'),('30','30 días'),('custom','Personalizado')] %}<option value="{{ value }}" {% if form.horizon == value %}selected{% endif %}>{{ text }}</option>{% endfor %}</select></div><div><label for="custom">Número personalizado</label><input id="custom" name="custom" type="number" min="1" max="365" step="1" value="{{ form.custom }}" placeholder="1 a 365 días" aria-describedby="custom-help"><small id="custom-help">Se utiliza al seleccionar «Personalizado».</small></div></div>
+        <div class="actions"><a class="button secondary" href="{{ url_for('index') }}">Limpiar formulario</a><button class="button primary" type="submit">Calcular regresión <span aria-hidden="true">↗</span></button></div>
+      </div>
+    </form>
+  </section>
+  {% if result %}
+  <section class="results" aria-labelledby="results-title">
+    <div class="section-heading"><div><p class="eyebrow">03 / MODELO</p><h2 id="results-title">Resultados del análisis</h2><p>{{ result.origin.strftime('%d/%m/%Y') }} — {{ result.last.strftime('%d/%m/%Y') }}</p></div><span class="label success">Regresión calculada</span></div>
+    <div class="stat-grid">
+      <article class="card stat"><span>Registros analizados</span><strong>{{ result.count }}</strong><small>Observaciones válidas</small></article>
+      <article class="card stat"><span>Promedio de objetos</span><strong>{{ '%.2f'|format(result.average) }}</strong><small>Por día registrado</small></article>
+      <article class="card stat"><span>Pendiente</span><strong>{{ '%.4f'|format(result.slope) }}</strong><small>Objetos por día transcurrido</small></article>
+      <article class="card stat"><span>Coeficiente R² · ajuste</span><strong>{{ '%.4f'|format(result.fit.r2) if result.fit.r2 is not none else 'No aplica' }}</strong><small>Modelo final sobre el historial</small></article>
+    </div>
+    <div class="card equation"><div><span class="eyebrow">ECUACIÓN DEL MODELO FINAL</span><p class="formula">{{ result.equation }}</p></div><p>Y: objetos estimados · X: días desde {{ result.origin.strftime('%d/%m/%Y') }}.<br>Intercepto b = {{ '%.6g'|format(result.intercept) }}.</p></div>
+    <div class="card metrics-panel"><h3>Métricas: ajuste y evaluación</h3><div class="table-scroll"><table><thead><tr><th scope="col">Conjunto</th><th scope="col">Registros</th><th scope="col">R²</th><th scope="col">MAE</th><th scope="col">MSE</th><th scope="col">RMSE</th></tr></thead><tbody>
+      <tr><th scope="row">Ajuste · modelo final</th><td>{{ result.count }}</td><td>{{ '%.4f'|format(result.fit.r2) if result.fit.r2 is not none else 'No aplica' }}</td><td>{{ '%.4f'|format(result.fit.mae) }}</td><td>{{ '%.4f'|format(result.fit.mse) }}</td><td>{{ '%.4f'|format(result.fit.rmse) }}</td></tr>
+      {% if result.evaluation %}<tr><th scope="row">Evaluación · fechas reservadas</th><td>{{ result.test_count }}</td><td>{{ '%.4f'|format(result.evaluation.r2) if result.evaluation.r2 is not none else 'No aplica' }}</td><td>{{ '%.4f'|format(result.evaluation.mae) }}</td><td>{{ '%.4f'|format(result.evaluation.mse) }}</td><td>{{ '%.4f'|format(result.evaluation.rmse) }}</td></tr>{% endif %}
+    </tbody></table></div>
+    <p class="help">MAE y RMSE se expresan en objetos; MSE, en objetos². Las métricas utilizan la salida lineal original, sin limitar a cero. R² no se muestra cuando las cantidades observadas son constantes; puede ser negativo en evaluación.</p>
+    {% if result.evaluation %}<div class="notice subtle"><strong>Evaluación cronológica independiente</strong><p>Un modelo temporal se entrenó con las primeras {{ result.train_count }} observaciones (80 % aproximado) y se evaluó con las últimas {{ result.test_count }}, sin mezclarlas. Después se entrenó el modelo final con todo el historial para predecir. Esta evaluación pequeña es orientativa y no garantiza precisión futura.</p></div>{% else %}<div class="notice warning"><strong>Capacidad predictiva todavía no comprobada</strong><p>Con menos de 10 registros se muestran solo métricas de ajuste sobre los datos usados para entrenar. Un buen ajuste no demuestra que el modelo prediga correctamente fechas nuevas.</p></div>{% endif %}
+    {% if result.count < 14 %}<p class="help">Se recomienda reunir al menos 14 observaciones reales para comenzar a evaluar tendencias.</p>{% endif %}</div>
+  </section>
+  <section aria-labelledby="charts-title"><div class="section-heading"><div><p class="eyebrow">04 / VISUALIZACIÓN</p><h2 id="charts-title">Gráficos del análisis</h2></div></div><div class="chart-grid">
+    {% for chart in result.charts %}<figure class="card chart {% if loop.first %}chart-wide{% endif %}"><figcaption>{{ ['Dispersión y regresión lineal','Historial y predicciones futuras','Comparación de cantidades reales y ajustadas'][loop.index0] }}</figcaption><img src="data:image/png;base64,{{ chart }}" alt="{{ ['Puntos históricos y línea de regresión calculada','Historial real y estimaciones futuras diferenciadas por una separación temporal','Barras de cantidades reales y valores ajustados para las fechas registradas'][loop.index0] }}"></figure>{% endfor %}
+  </div></section>
+  <section aria-labelledby="forecast-title"><div class="section-heading"><div><p class="eyebrow">05 / PROYECCIÓN</p><h2 id="forecast-title">Predicciones futuras</h2><p>A partir del día siguiente al último registro; incluye todos los días del calendario.</p></div></div>
+    <div class="forecast-grid"><div class="card forecast-summary"><span class="label success">Próximos {{ result.horizon }} días</span><p>Total estimado de objetos</p><strong class="forecast-total">{{ '%.2f'|format(result.total) }}</strong><p>Promedio diario previsto: <b>{{ '%.2f'|format(result.future_average) }}</b> objetos.</p><hr><h3>Interpretación de la tendencia</h3><p>{{ result.trend }}.</p><p class="help">Se considera cercana a cero una pendiente cuyo cambio durante el historial es menor al 1 % del mayor entre el promedio observado y 1.</p><p>Una tendencia histórica no garantiza que el comportamiento futuro sea igual. Las estimaciones son valores esperados, por eso pueden contener decimales.</p>{% if result.clipped %}<div class="notice warning">Se aplicó un mínimo de cero a las predicciones negativas. El total y el promedio utilizan estos valores limitados.</div>{% endif %}</div>
+    <div class="card forecast-table"><div class="table-scroll forecast-scroll"><table><caption>Cantidad estimada por fecha · no son registros reales</caption><thead><tr><th scope="col">Fecha</th><th scope="col">Objetos estimados</th></tr></thead><tbody>{% for day, quantity in result.predictions %}<tr><td>{{ day.strftime('%d/%m/%Y') }}</td><td>{{ '%.2f'|format(quantity) }}</td></tr>{% endfor %}</tbody></table></div></div></div>
+  </section>
+  {% else %}
+  <div class="empty-state"><span class="empty-icon" aria-hidden="true">↗</span><h3>Tu próximo análisis comienza aquí</h3><p>Ingresa al menos 3 registros reales y pulsa «Calcular regresión». Los resultados, gráficos y predicciones aparecerán en esta página.</p></div>
+  {% endif %}
+</main>
+<footer class="container"><span>UNIFRANZ · Servicios Estudiantiles</span><span>Procesamiento temporal en memoria · Sin almacenamiento permanente</span></footer>
+</body>
+</html>
