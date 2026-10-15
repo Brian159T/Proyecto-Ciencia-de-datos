@@ -2,7 +2,7 @@
 import base64
 import math
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from threading import Lock
 
@@ -12,19 +12,67 @@ import matplotlib.dates as mdates
 from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
+from openpyxl import load_workbook
 from flask import Flask, render_template, request
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
 PLOT_LOCK = Lock()
 MAX_RECORDS = 2000
 MAX_HORIZON = 365
 
 
 def blank_form():
-    return {"rows": [("", "") for _ in range(10)], "bulk": "", "horizon": "7", "custom": ""}
+    return {"rows": [("", "") for _ in range(10)], "bulk": "", "horizon": "7", "custom": "",
+            "excel": [], "excel_name": "", "excel_errors": []}
+
+
+def excel_date(value):
+    """Convierte una celda de fecha de Excel a AAAA-MM-DD (o texto original si no se reconoce)."""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    text = str(value).strip()
+    match = re.fullmatch(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})", text)
+    if match:
+        return f"{match[3]}-{int(match[2]):02d}-{int(match[1]):02d}"
+    return text
+
+
+def excel_count(value):
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def read_excel(upload):
+    """Lee la primera hoja (columna A: fecha, columna B: cantidad). Devuelve (filas, errores)."""
+    name = upload.filename or ""
+    if not name.lower().endswith(".xlsx"):
+        return [], ["El archivo debe tener formato Excel .xlsx."]
+    rows = []
+    try:
+        workbook = load_workbook(upload.stream, read_only=True, data_only=True)
+        sheet = workbook.worksheets[0]
+        for index, row in enumerate(sheet.iter_rows(min_row=1, max_col=2, values_only=True), 1):
+            first, second = (list(row) + [None, None])[:2]
+            if first is None and second is None:
+                continue
+            if index == 1 and isinstance(first, str) and not re.search(r"\d", first):
+                continue  # encabezado de columnas
+            if len(rows) >= MAX_RECORDS + 1:
+                return rows, [f"El archivo supera el máximo de {MAX_RECORDS} registros."]
+            rows.append((excel_date(first) if first is not None else "",
+                         excel_count(second) if second is not None else ""))
+        workbook.close()
+    except Exception:
+        return [], ["No se pudo leer el archivo Excel. Verifica que sea un .xlsx válido."]
+    if not rows:
+        return [], ["El archivo Excel no contiene datos en las columnas A (fecha) y B (cantidad)."]
+    return rows, []
 
 
 def read_form():
@@ -32,8 +80,14 @@ def read_form():
     counts = request.form.getlist("quantity")
     size = max(len(dates), len(counts), 10)
     rows = [(dates[i] if i < len(dates) else "", counts[i] if i < len(counts) else "") for i in range(min(size, MAX_RECORDS))]
+    excel, excel_errors, excel_name = [], [], ""
+    upload = request.files.get("excel")
+    if upload and upload.filename:
+        excel_name = upload.filename
+        excel, excel_errors = read_excel(upload)
     return {"rows": rows, "bulk": request.form.get("bulk", ""),
             "horizon": request.form.get("horizon", "7"), "custom": request.form.get("custom", ""),
+            "excel": excel, "excel_name": excel_name, "excel_errors": excel_errors,
             "table_overflow": max(len(dates), len(counts)) > MAX_RECORDS}
 
 
@@ -79,6 +133,9 @@ def validate(form):
             errors.append(f"Texto, línea {i}: utiliza AAAA-MM-DD,cantidad.")
         else:
             add(*parts, f"Texto, línea {i}")
+    errors.extend(form.get("excel_errors", []))
+    for i, (raw_date, raw_count) in enumerate(form.get("excel", []), 1):
+        add(raw_date, raw_count, f"Excel, fila {i}")
     if len(records) < 3:
         errors.append("Ingresa al menos 3 registros válidos en fechas diferentes.")
     if len(records) > MAX_RECORDS:
@@ -192,12 +249,17 @@ def analyze(records, horizon):
     near_zero = abs(slope) * max(days[-1], 1) < .01 * max(float(y.mean()), 1)
     trend = "No se observa una tendencia lineal importante" if near_zero else (
         "El modelo muestra una tendencia creciente" if slope > 0 else "El modelo muestra una tendencia decreciente")
-    return {"count": len(y), "average": float(y.mean()), "slope": slope, "intercept": intercept,
+    r2 = metrics(y, fitted)["r2"]
+    quality = ("Sin variación para evaluar", "neutral") if r2 is None else (
+        ("Ajuste fuerte", "good") if r2 >= .7 else ("Ajuste moderado", "mid") if r2 >= .4 else ("Ajuste débil", "low"))
+    return {"quality": quality[0], "quality_level": quality[1], "count": len(y), "average": float(y.mean()), "slope": slope, "intercept": intercept,
             "equation": f"Y = {slope:.6g}X {'+' if intercept >= 0 else '−'} {abs(intercept):.6g}",
             "fit": metrics(y, fitted), "evaluation": evaluation, "train_count": split,
             "test_count": len(y)-split if split else None, "origin": dates[0], "last": dates[-1],
             "horizon": horizon, "total": float(future.sum()), "future_average": float(future.mean()),
             "predictions": list(zip(future_dates, future.tolist())), "trend": trend,
+            "peak": float(y.max()), "peak_date": dates[int(y.argmax())], "first_pred": float(future[0]),
+            "last_pred": float(future[-1]), "daily_change": slope,
             "clipped": bool(np.any(raw_future < 0)),
             "charts": graphs(days, y, fitted, dates, future_dates, future)}
 
