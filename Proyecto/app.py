@@ -1,9 +1,10 @@
 """Dashboard UNIFRANZ: datos y modelos temporales por petición."""
 import base64
+import csv
 import math
 import re
 from datetime import date, datetime, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from threading import Lock
 
 import matplotlib
@@ -17,6 +18,8 @@ from flask import Flask, render_template, request
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+import database
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
 PLOT_LOCK = Lock()
@@ -29,13 +32,41 @@ def blank_form():
             "excel": [], "excel_name": "", "excel_errors": []}
 
 
+def form_from_compact(raw, raw_horizon):
+    """Reconstruye un formulario a partir de los registros ya validados."""
+    rows = []
+    for chunk in (raw or "").split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "," in chunk:
+            day, quantity = chunk.rsplit(",", 1)
+            rows.append((day.strip(), quantity.strip()))
+        else:
+            rows.append((chunk, ""))
+    raw_horizon = (raw_horizon or "").strip()
+    horizon = raw_horizon if raw_horizon in ("7", "14", "30") else "custom"
+    custom = "" if horizon != "custom" else raw_horizon
+    return {"rows": rows, "bulk": "", "horizon": horizon, "custom": custom,
+            "excel": [], "excel_name": "", "excel_errors": [], "table_overflow": False}
+
+
+def render_page(form, errors, result=None, status=200, save_message=None, save_error=None):
+    return render_template("index.html", form=form, errors=errors, result=result,
+                           save_enabled=database.is_configured(),
+                           save_message=save_message, save_error=save_error), status
+
+
 def excel_date(value):
-    """Convierte una celda de fecha de Excel a AAAA-MM-DD (o texto original si no se reconoce)."""
+    """Convierte una fecha de Excel o CSV a AAAA-MM-DD (o texto original si no se reconoce)."""
     if isinstance(value, datetime):
         return value.date().isoformat()
     if isinstance(value, date):
         return value.isoformat()
     text = str(value).strip()
+    match = re.fullmatch(r"(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})", text)
+    if match:
+        return f"{match[1]}-{int(match[2]):02d}-{int(match[3]):02d}"
     match = re.fullmatch(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})", text)
     if match:
         return f"{match[3]}-{int(match[2]):02d}-{int(match[1]):02d}"
@@ -45,7 +76,9 @@ def excel_date(value):
 def excel_count(value):
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
-    return str(value).strip()
+    text = str(value).strip()
+    match = re.fullmatch(r"(\d+)\.0+", text)
+    return match.group(1) if match else text
 
 
 def read_excel(upload):
@@ -55,13 +88,14 @@ def read_excel(upload):
         return [], ["El archivo debe tener formato Excel .xlsx."]
     rows = []
     try:
-        workbook = load_workbook(upload.stream, read_only=True, data_only=True)
+        upload.stream.seek(0)
+        workbook = load_workbook(BytesIO(upload.stream.read()), read_only=True, data_only=True)
         sheet = workbook.worksheets[0]
-        for index, row in enumerate(sheet.iter_rows(min_row=1, max_col=2, values_only=True), 1):
+        for row in sheet.iter_rows(min_row=1, max_col=2, values_only=True):
             first, second = (list(row) + [None, None])[:2]
             if first is None and second is None:
                 continue
-            if index == 1 and isinstance(first, str) and not re.search(r"\d", first):
+            if not rows and isinstance(first, str) and first.strip() and not re.search(r"\d", first):
                 continue  # encabezado de columnas
             if len(rows) >= MAX_RECORDS + 1:
                 return rows, [f"El archivo supera el máximo de {MAX_RECORDS} registros."]
@@ -75,6 +109,55 @@ def read_excel(upload):
     return rows, []
 
 
+def read_csv(upload):
+    """Lee un CSV (columna A: fecha, columna B: cantidad). Devuelve (filas, errores)."""
+    try:
+        raw = upload.stream.read()
+    except Exception:
+        return [], ["No se pudo leer el archivo CSV."]
+    text = None
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        return [], ["No se pudo leer el archivo CSV. Guarda el archivo en UTF-8."]
+    sample = text[:4096]
+    try:
+        delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t").delimiter
+    except csv.Error:
+        delimiter = ","
+    rows = []
+    try:
+        for row in csv.reader(StringIO(text), delimiter=delimiter):
+            first = row[0] if len(row) > 0 else ""
+            second = row[1] if len(row) > 1 else ""
+            if not first.strip() and not second.strip():
+                continue
+            if not rows and first.strip() and not re.search(r"\d", first):
+                continue  # encabezado de columnas
+            if len(rows) >= MAX_RECORDS + 1:
+                return rows, [f"El archivo supera el máximo de {MAX_RECORDS} registros."]
+            rows.append((excel_date(first), excel_count(second)))
+    except csv.Error:
+        return [], ["No se pudo interpretar el archivo CSV. Verifica el formato."]
+    if not rows:
+        return [], ["El archivo CSV no contiene datos en las columnas A (fecha) y B (cantidad)."]
+    return rows, []
+
+
+def read_upload(upload):
+    """Lee un .xlsx o .csv y devuelve (filas, errores)."""
+    name = (upload.filename or "").lower()
+    if name.endswith(".csv"):
+        return read_csv(upload)
+    if name.endswith(".xlsx"):
+        return read_excel(upload)
+    return [], ["El archivo debe ser Excel .xlsx o CSV .csv."]
+
+
 def read_form():
     dates = request.form.getlist("date")
     counts = request.form.getlist("quantity")
@@ -84,7 +167,7 @@ def read_form():
     upload = request.files.get("excel")
     if upload and upload.filename:
         excel_name = upload.filename
-        excel, excel_errors = read_excel(upload)
+        excel, excel_errors = read_upload(upload)
     return {"rows": rows, "bulk": request.form.get("bulk", ""),
             "horizon": request.form.get("horizon", "7"), "custom": request.form.get("custom", ""),
             "excel": excel, "excel_name": excel_name, "excel_errors": excel_errors,
@@ -92,7 +175,7 @@ def read_form():
 
 
 def validate(form):
-    errors, records, seen = [], [], set()
+    errors, records, seen, duplicates = [], [], {}, []
     if form.get("table_overflow"):
         errors.append(f"Se admiten hasta {MAX_RECORDS} filas de tabla; reduce los registros enviados.")
 
@@ -117,11 +200,17 @@ def validate(form):
         if len(raw_count) > 7 or int(raw_count) > 1000000:
             errors.append(f"{label}: la cantidad máxima admitida es 1 000 000.")
             return
+        quantity = int(raw_count)
         if day in seen:
-            errors.append(f"{label}: la fecha {raw_date} está duplicada en los datos ingresados.")
+            origin_label, origin_quantity = seen[day]
+            if quantity != origin_quantity:
+                errors.append(f"{label}: la fecha {raw_date} ya está registrada en {origin_label} "
+                              f"con otra cantidad ({origin_quantity}).")
+            else:
+                duplicates.append(raw_date)
             return
-        seen.add(day)
-        records.append((day, int(raw_count)))
+        seen[day] = (label, quantity)
+        records.append((day, quantity))
 
     for i, (day, count) in enumerate(form["rows"], 1):
         add(day, count, f"Fila {i}")
@@ -134,8 +223,16 @@ def validate(form):
         else:
             add(*parts, f"Texto, línea {i}")
     errors.extend(form.get("excel_errors", []))
+    file_label = "CSV" if form.get("excel_name", "").lower().endswith(".csv") else "Excel"
     for i, (raw_date, raw_count) in enumerate(form.get("excel", []), 1):
-        add(raw_date, raw_count, f"Excel, fila {i}")
+        add(raw_date, raw_count, f"{file_label}, fila {i}")
+    if duplicates:
+        total = len(duplicates)
+        form["duplicate_notice"] = (
+            f"Se omitió 1 fecha duplicada en los datos ingresados; se conservó el primer valor."
+            if total == 1 else
+            f"Se omitieron {total} fechas duplicadas en los datos ingresados; se conservó el primer valor."
+        )
     if len(records) < 3:
         errors.append("Ingresa al menos 3 registros válidos en fechas diferentes.")
     if len(records) > MAX_RECORDS:
@@ -221,7 +318,33 @@ def graphs(days, y, fitted, dates, future_dates, future):
         ax.set_xticks(ticks, [dates[i].strftime("%d/%m/%Y") for i in ticks], rotation=30, ha="right")
         ax.legend(frameon=False)
         third = figure_image(fig)
-    return [first, second, third]
+
+        fig = Figure(figsize=(7, 5.2), layout="constrained")
+        ax = fig.subplots()
+        weekday_totals = np.zeros(7)
+        for day, quantity in zip(dates, y):
+            weekday_totals[day.weekday()] += quantity
+        names = np.array(["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"])
+        palette = np.array(["#3269e8", "#0b9e91", "#12243c", "#8192a7", "#6ed6cc", "#94a9c9", "#c3d2e4"])
+        ax.set_title("Distribución de objetos registrados por día de la semana",
+                     loc="left", fontsize=14, fontweight="bold", color="#12243c", pad=18)
+        if weekday_totals.sum() > 0:
+            present = weekday_totals > 0
+            labels = [f"{name}\n{int(total)}" for name, total in zip(names[present], weekday_totals[present])]
+            wedges, _, percents = ax.pie(
+                weekday_totals[present], labels=labels, colors=palette[present].tolist(),
+                autopct="%.1f%%", startangle=90, counterclock=False,
+                textprops={"color": "#12243c", "fontsize": 9},
+                wedgeprops={"edgecolor": "white", "linewidth": 1.5})
+            for wedge, percent in zip(wedges, percents):
+                red, green, blue = wedge.get_facecolor()[:3]
+                if .299*red + .587*green + .114*blue < .5:
+                    percent.set_color("white")
+        else:
+            ax.text(.5, .5, "Sin objetos registrados", ha="center", va="center", color="#52647b")
+            ax.axis("off")
+        fourth = figure_image(fig)
+    return [first, second, third, fourth]
 
 
 def analyze(records, horizon):
@@ -247,8 +370,15 @@ def analyze(records, horizon):
     slope, intercept = float(model.coef_[0]), float(model.intercept_)
     # Umbral explícito: cambio menor al 1 % de max(promedio, 1) durante el historial.
     near_zero = abs(slope) * max(days[-1], 1) < .01 * max(float(y.mean()), 1)
-    trend = "No se observa una tendencia lineal importante" if near_zero else (
-        "El modelo muestra una tendencia creciente" if slope > 0 else "El modelo muestra una tendencia decreciente")
+    if near_zero:
+        trend_direction = "estable"
+        trend = "No se observa una tendencia lineal importante"
+    elif slope > 0:
+        trend_direction = "creciente"
+        trend = "El modelo muestra una tendencia creciente"
+    else:
+        trend_direction = "decreciente"
+        trend = "El modelo muestra una tendencia decreciente"
     r2 = metrics(y, fitted)["r2"]
     quality = ("Sin variación para evaluar", "neutral") if r2 is None else (
         ("Ajuste fuerte", "good") if r2 >= .7 else ("Ajuste moderado", "mid") if r2 >= .4 else ("Ajuste débil", "low"))
@@ -258,6 +388,9 @@ def analyze(records, horizon):
             "test_count": len(y)-split if split else None, "origin": dates[0], "last": dates[-1],
             "horizon": horizon, "total": float(future.sum()), "future_average": float(future.mean()),
             "predictions": list(zip(future_dates, future.tolist())), "trend": trend,
+            "trend_direction": trend_direction, "near_zero": near_zero,
+            "raw_predictions": list(zip(future_dates, raw_future.tolist())),
+            "records_compact": ";".join(f"{day.isoformat()},{quantity}" for day, quantity in records),
             "peak": float(y.max()), "peak_date": dates[int(y.argmax())], "first_pred": float(future[0]),
             "last_pred": float(future[-1]), "daily_change": slope,
             "clipped": bool(np.any(raw_future < 0)),
@@ -266,7 +399,7 @@ def analyze(records, horizon):
 
 @app.get("/")
 def index():
-    return render_template("index.html", form=blank_form(), errors=[], result=None)
+    return render_page(blank_form(), [])
 
 
 @app.post("/predict")
@@ -274,20 +407,43 @@ def predict():
     form = read_form()
     records, horizon, errors = validate(form)
     if errors:
-        return render_template("index.html", form=form, errors=errors, result=None), 422
+        return render_page(form, errors, status=422)
     try:
         result = analyze(records, horizon)
     except Exception:
         app.logger.exception("No se pudo realizar el análisis")
-        return render_template("index.html", form=form, result=None,
-            errors=["No se pudo completar el análisis. Revisa los datos e intenta nuevamente."]), 500
-    return render_template("index.html", form=form, errors=[], result=result)
+        return render_page(form, ["No se pudo completar el análisis. Revisa los datos e intenta nuevamente."], status=500)
+    return render_page(form, [], result)
+
+
+@app.post("/save")
+def save_prediction():
+    form = form_from_compact(request.form.get("records", ""), request.form.get("horizon", "7"))
+    records, horizon, errors = validate(form)
+    if errors:
+        return render_page(form, errors, status=422)
+    try:
+        result = analyze(records, horizon)
+    except Exception:
+        app.logger.exception("No se pudo recalcular el análisis antes de guardar")
+        return render_page(form, ["No se pudo preparar la predicción para guardar. Intenta nuevamente."], status=500)
+    try:
+        analysis_id = database.save_analysis(records, result)
+    except RuntimeError as error:
+        return render_page(form, [], result, status=503, save_error=str(error))
+    except Exception:
+        app.logger.exception("No se pudo guardar el análisis en PostgreSQL")
+        return render_page(form, [], result, status=503,
+            save_error="No se pudo guardar la predicción en la base de datos. Revisa la conexión e intenta nuevamente.")
+    return render_page(form, [], result,
+        save_message=(f"Identificador #{analysis_id}. Se almacenaron {result['count']} observaciones "
+                      f"históricas y {result['horizon']} días de proyección en PostgreSQL."))
 
 
 @app.errorhandler(413)
 def too_large(error):
-    return render_template("index.html", form=blank_form(), result=None,
-        errors=["La solicitud es demasiado grande. Se admite hasta 1 MB y 2 000 registros."]), 413
+    return render_page(blank_form(),
+        ["La solicitud es demasiado grande. Se admiten hasta 3 MB y 2 000 registros."], status=413)
 
 
 if __name__ == "__main__":
