@@ -318,7 +318,33 @@ def graphs(days, y, fitted, dates, future_dates, future):
         ax.set_xticks(ticks, [dates[i].strftime("%d/%m/%Y") for i in ticks], rotation=30, ha="right")
         ax.legend(frameon=False)
         third = figure_image(fig)
-    return [first, second, third]
+
+        fig = Figure(figsize=(7, 5.2), layout="constrained")
+        ax = fig.subplots()
+        weekday_totals = np.zeros(7)
+        for day, quantity in zip(dates, y):
+            weekday_totals[day.weekday()] += quantity
+        names = np.array(["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"])
+        palette = np.array(["#3269e8", "#0b9e91", "#12243c", "#8192a7", "#6ed6cc", "#94a9c9", "#c3d2e4"])
+        ax.set_title("Distribución de objetos registrados por día de la semana",
+                     loc="left", fontsize=14, fontweight="bold", color="#12243c", pad=18)
+        if weekday_totals.sum() > 0:
+            present = weekday_totals > 0
+            labels = [f"{name}\n{int(total)}" for name, total in zip(names[present], weekday_totals[present])]
+            wedges, _, percents = ax.pie(
+                weekday_totals[present], labels=labels, colors=palette[present].tolist(),
+                autopct="%.1f%%", startangle=90, counterclock=False,
+                textprops={"color": "#12243c", "fontsize": 9},
+                wedgeprops={"edgecolor": "white", "linewidth": 1.5})
+            for wedge, percent in zip(wedges, percents):
+                red, green, blue = wedge.get_facecolor()[:3]
+                if .299*red + .587*green + .114*blue < .5:
+                    percent.set_color("white")
+        else:
+            ax.text(.5, .5, "Sin objetos registrados", ha="center", va="center", color="#52647b")
+            ax.axis("off")
+        fourth = figure_image(fig)
+    return [first, second, third, fourth]
 
 
 def analyze(records, horizon):

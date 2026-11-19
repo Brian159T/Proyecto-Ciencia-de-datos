@@ -30,7 +30,7 @@ Abre **http://127.0.0.1:5000**. Para detener el servidor pulsa Ctrl+C. No necesi
 1. Introduce fechas y cantidades diarias reales en las 10 filas editables. Deja completamente vacías las filas que no necesites.
 2. Opcionalmente pega más registros en el campo de texto, con una línea por registro: AAAA-MM-DD,cantidad. No incluyas encabezado. También puedes cargar un archivo `.xlsx` o `.csv` con dos columnas (fecha, cantidad); en Excel se usa la primera hoja, el encabezado es opcional y el CSV admite coma, punto y coma o tabulador. Los datos de la tabla, el texto y el archivo se combinan. Si una fecha se repite con la misma cantidad, se omite la repetición y se conserva el primer valor; si la cantidad es distinta, se muestra un error.
 3. Selecciona 7, 14 o 30 días; para otra cantidad elige Personalizado y completa el número (1 a 365).
-4. Pulsa **Calcular regresión**. Los resultados, tres gráficos y la tabla de predicciones aparecen en la misma página. Los datos introducidos permanecen visibles para modificarlos y recalcular.
+4. Pulsa **Calcular regresión**. Los resultados, cuatro gráficos y la tabla de predicciones aparecen en la misma página. Los datos introducidos permanecen visibles para modificarlos y recalcular.
 5. Pulsa **Limpiar formulario** para regresar a la página inicial vacía.
 
 Se requieren al menos 3 fechas distintas. Se recomiendan 14 o más observaciones reales. Se admiten cantidades enteras de 0 a 1 000 000 y hasta 2 000 registros por petición (máximo 3 MB). No se admiten fechas inválidas, campos incompletos, valores negativos ni no numéricos. Los duplicados con la misma cantidad se omiten; los duplicados con cantidad distinta se rechazan. Los ceros son válidos; los días sin observación no se completan automáticamente. En archivos, las fechas se aceptan como AAAA-MM-DD, AAAA/MM/DD, dd/mm/aaaa, dd-mm-aaaa o dd.mm.aaaa.
@@ -45,6 +45,7 @@ Los registros se ordenan por fecha. X representa días naturales transcurridos d
 - Las métricas y los gráficos de ajuste utilizan las salidas lineales originales. Las cantidades futuras mostradas se limitan a cero; el total y promedio futuros utilizan esos valores limitados, sin redondeo previo. La tabla se redondea a dos decimales, así que pueden existir diferencias pequeñas al sumar valores visibles.
 - Se predicen todos los días naturales siguientes al último registro, incluidos fines de semana. No se modelan feriados, calendario universitario ni estacionalidad.
 - Se considera una tendencia cercana a cero cuando el cambio absoluto del modelo durante el historial es menor al 1 % de max(promedio real, 1). Este criterio descriptivo no es una prueba de significancia estadística.
+- El gráfico de torta muestra qué porcentaje del total registrado corresponde a cada día de la semana. Agrupa todos los registros históricos; no es una predicción ni corrige semanas con distinta cantidad de cada día.
 
 El promedio histórico corresponde únicamente a los días registrados. Una tendencia histórica no garantiza el comportamiento futuro; las estimaciones pueden contener decimales y no constituyen conteos observados ni intervalos de confianza.
 

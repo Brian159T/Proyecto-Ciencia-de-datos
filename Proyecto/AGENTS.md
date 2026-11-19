@@ -59,7 +59,7 @@ python app.py
 - Verificación disponible hoy (no hay suite de pruebas):
   - `.venv\Scripts\python.exe -m pip check`
   - `.venv\Scripts\python.exe -m compileall app.py database.py init_db.py`
-  - Smoke test manual: abrir `/`, enviar `POST /predict` con ≥3 fechas distintas y comprobar 200 + 3 gráficos.
+  - Smoke test manual: abrir `/`, enviar `POST /predict` con ≥3 fechas distintas y comprobar 200 + 4 gráficos.
   - Guardado: `python init_db.py`, calcular, pulsar «Guardar datos» y verificar las tres tablas.
 - Si agregas pruebas, usa `unittest` (librería estándar) o `pytest`; documenta el comando aquí. El README afirma que existieron 15 pruebas con `unittest` y el cliente de Flask, pero **no se versionaron**.
 
@@ -75,7 +75,7 @@ python app.py
      - archivo `excel` (`.xlsx` o `.csv`).
    - `validate(form)`: devuelve `(records ordenados, horizon, errors)`.
    - Con errores → HTTP **422** y se re-renderiza conservando los datos.
-   - `analyze(records, horizon)` → modelo, métricas, predicciones y 3 PNG Base64.
+    - `analyze(records, horizon)` → modelo, métricas, predicciones y 4 PNG Base64.
    - Excepción no controlada → **500** con mensaje genérico (stack trace solo al log).
    - `413` → archivo/petición demasiado grande.
 3. `analyze(records, horizon)` (`app.py:227`):
@@ -87,10 +87,11 @@ python app.py
    - Recorta predicciones negativas a 0 (`np.maximum(0, ...)`) y marca `clipped`.
    - `near_zero` (tendencia despreciable): `|pendiente| * días_historial < 1% * max(promedio, 1)`.
    - R² se omite (`None`) si `Y` es constante (`np.ptp == 0`).
-4. `graphs()` (`app.py:191`): genera 3 figuras con backend `Agg` y las serializa a Base64 con `PLOT_LOCK`.
+4. `graphs()` (`app.py:191`): genera 4 figuras con backend `Agg` y las serializa a Base64 con `PLOT_LOCK`.
    - Dispersión + regresión.
    - Historial + proyección con línea de corte.
    - Barras reales vs ajustadas.
+   - Torta con la proporción de objetos registrados por día de la semana (suma histórica; sin datos positivos muestra un aviso).
 5. La plantilla `templates/index.html` renderiza todo en la misma página (contexto, formulario, resultados, gráficos, resumen). No hay rutas AJAX.
 6. `POST /save` (botón «Guardar datos»): recibe el campo compacto `records` (`AAAA-MM-DD,cantidad;...`) y `horizon`, los revalida, reanaliza y llama a `database.save_analysis()`. Inserta en `analyses`, `analysis_records` y `analysis_predictions` dentro de una transacción. El botón solo se habilita si `database.is_configured()` (hay `PGPASSWORD` o `DATABASE_URL`); si no, queda deshabilitado y la ruta responde 503.
 
